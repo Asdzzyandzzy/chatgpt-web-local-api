@@ -448,7 +448,7 @@ function getAutomationScript() {
 
         const lowerTitle = title.toLowerCase();
         const lowerText = rawText.toLowerCase();
-        if (lowerTitle === project.title.toLowerCase() && lines.length <= 1) return;
+        if (lowerTitle === project.title.toLowerCase()) return;
         if (['chats', 'sources', 'share'].includes(lowerTitle)) return;
         if (lowerText.includes('new chat in') || lowerText.includes('instant')) return;
         if (title === '...' || title === '⋯') return;
@@ -512,6 +512,8 @@ function getAutomationScript() {
 
           const text = textOf(el);
           if (!text || text.length > 500) continue;
+          const textLines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+          if (textLines.length < 2) continue;
 
           const childWithSameText = [...el.children].some((child) => {
             if (!visible(child)) return false;
@@ -982,6 +984,64 @@ function getAutomationScript() {
       };
     }
 
+    if (action === 'debugProjectChatCandidates') {
+      const roots = [
+        document.querySelector('main'),
+        document.querySelector('[role="main"]')
+      ].filter(Boolean);
+      const scanRoots = roots.length ? roots : [document.body];
+      const candidates = [];
+
+      for (const root of scanRoots) {
+        const selector = [
+          'a[href]',
+          '[role="link"]',
+          '[role="button"]',
+          'button',
+          '[tabindex]:not([tabindex="-1"])',
+          '[data-testid*="conversation"]',
+          '[data-testid*="thread"]',
+          '[data-testid*="chat"]',
+          '[class*="cursor-pointer"]'
+        ].join(',');
+
+        for (const el of root.querySelectorAll(selector)) {
+          if (!visible(el) || el.closest('nav') || el.closest('aside')) continue;
+          const rect = el.getBoundingClientRect();
+          const text = textOf(el);
+          if (!text || rect.width < 80 || rect.height < 20) continue;
+
+          const data = {};
+          for (const attr of el.attributes) {
+            if (attr.name.startsWith('data-')) data[attr.name] = attr.value;
+          }
+
+          candidates.push({
+            tag: el.tagName.toLowerCase(),
+            role: el.getAttribute('role'),
+            href: el.getAttribute('href'),
+            ariaLabel: el.getAttribute('aria-label'),
+            title: el.getAttribute('title'),
+            className: String(el.className || '').slice(0, 180),
+            data,
+            rect: {
+              width: Math.round(rect.width),
+              height: Math.round(rect.height)
+            },
+            text: text.slice(0, 500)
+          });
+
+          if (candidates.length >= 80) break;
+        }
+        if (candidates.length >= 80) break;
+      }
+
+      return {
+        project: getCurrentProject(),
+        candidates
+      };
+    }
+
     if (action === 'newProjectChat') {
       const timeoutMs = payload?.timeoutMs || 120000;
       const result = clickNewProjectChat();
@@ -1234,6 +1294,10 @@ async function openProjectChat(body = {}) {
     return openUrl(body.url);
   }
 
+  if (body.chatId) {
+    return openUrl(`https://chatgpt.com/c/${encodeURIComponent(body.chatId)}`);
+  }
+
   let project = null;
   if (body.projectUrl || body.projectTitle) {
     project = await openProject({
@@ -1243,7 +1307,7 @@ async function openProjectChat(body = {}) {
   }
 
   if (!body.title && !Number.isInteger(body.index)) {
-    throw new Error('Request body must include title or index. Optional: projectUrl or projectTitle.');
+    throw new Error('Request body must include url, chatId, title, or index. Optional: projectUrl or projectTitle.');
   }
 
   const result = await runInPage(getAutomationScript().toString(), 'openProjectChat', {
@@ -1266,6 +1330,10 @@ async function openProjectChat(body = {}) {
       projectChatId: withParsedIds.ids.projectChatId || withParsedIds.ids.chatId || null
     }
   };
+}
+
+async function debugProjectChatCandidates() {
+  return runInPage(getAutomationScript().toString(), 'debugProjectChatCandidates', {});
 }
 
 async function createNewProject(body) {
@@ -1467,6 +1535,13 @@ function startApiServer() {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/debug/project-chat-candidates') {
+        const result = await debugProjectChatCandidates();
+        log('Debugged project chat candidates', `count=${result.candidates.length}`);
+        sendJson(res, 200, result);
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/new-project') {
         const body = await readJsonBody(req);
         const result = await createNewProject(body);
@@ -1500,6 +1575,7 @@ function startApiServer() {
           'POST /open-project',
           'POST /project-chats',
           'POST /open-project-chat',
+          'GET /debug/project-chat-candidates',
           'POST /new-project',
           'POST /new-project-chat'
         ]

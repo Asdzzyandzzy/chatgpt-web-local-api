@@ -72,6 +72,7 @@ http://127.0.0.1:3123
 | `GET` | `/project-chats` | 读取当前 Project 页面里可见的历史 chat |
 | `POST` | `/project-chats` | 先打开 Project，再读取其中可见历史 chat |
 | `POST` | `/open-project-chat` | 打开 Project 中可见的某条 chat，并从 URL 读取 ID |
+| `GET` | `/debug/project-chat-candidates` | 只读诊断 Project chat 卡片 DOM 候选 |
 | `POST` | `/new-project` | 尝试通过网页 UI 新建 Project |
 | `POST` | `/new-project-chat` | 在当前或指定 Project 里新开 chat |
 
@@ -268,6 +269,22 @@ curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
   -d "{\"title\":\"项目阶段协作\"}"
 ```
 
+如果你已经知道 chat id，不需要 Project id，直接打开 `/c/{chatId}` 即可：
+
+```bat
+curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"chatId\":\"your-chat-id\"}"
+```
+
+或直接传完整 URL：
+
+```bat
+curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"url\":\"https://chatgpt.com/c/your-chat-id\"}"
+```
+
 如果要先打开指定 Project 再打开其中某条 chat：
 
 ```bat
@@ -318,6 +335,12 @@ Project 相关接口也会尽量返回 `ids`。在 Project 内部 chat 页面上
 当你停在 Project 首页时，`chatId` 和 `projectChatId` 为 `null` 是正常的，因为当前没有打开具体 chat。`projectId` 只能用来打开 Project，不能当成 chat id 使用；直接拿 `projectId` 去打开 chat 会 404。打开 Project 里的某条 chat 后，`/ids` 才会返回对应的 `projectChatId`。
 
 如果你调用 `/new-project-chat` 后还没有发送任何消息，返回里可能还没有 `chatId`。发出第一条 `/chat` 后，再从 `/chat` 返回或 `/ids` 读取新的 Project chat id。
+
+如果 `/project-chats` 识别不准，可以运行只读诊断命令，把返回发给开发者调整选择器。它不会点击、导航或发消息：
+
+```bat
+curl.exe http://127.0.0.1:3123/debug/project-chat-candidates
+```
 
 ## 让其他项目调用
 
