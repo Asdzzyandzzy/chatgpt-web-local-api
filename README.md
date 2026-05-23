@@ -92,6 +92,8 @@ curl -X POST http://127.0.0.1:3123/refresh
 
 这会刷新当前 Electron 窗口里的 ChatGPT 页面，不会清除持久化 session 或 Cookie。刷新后如果页面要求登录、验证码或人工确认，请在可见窗口里手动处理。
 
+也可以在应用菜单里点击 `View -> Reload ChatGPT`，或使用快捷键 `Ctrl+R`。如果普通刷新没反应，点击 `View -> Hard Reload ChatGPT`，或使用 `Ctrl+Shift+R`。
+
 ## 安全设置
 
 Electron 远程页面配置：

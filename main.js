@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session } = require('electron');
+const { app, BrowserWindow, Menu, session } = require('electron');
 const http = require('node:http');
 
 const CHATGPT_URL = 'https://chatgpt.com';
@@ -56,6 +56,56 @@ function ensureWindow() {
     throw new Error('Browser window is not available.');
   }
   return mainWindow;
+}
+
+function reloadMainWindow(ignoreCache = false) {
+  const win = ensureWindow();
+  isPageLoaded = false;
+
+  if (ignoreCache) {
+    win.webContents.reloadIgnoringCache();
+  } else {
+    win.webContents.reload();
+  }
+
+  return win.webContents.getURL();
+}
+
+function createMenu() {
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Reload ChatGPT',
+          accelerator: 'CommandOrControl+R',
+          click: () => {
+            const url = reloadMainWindow(false);
+            log('Menu reload requested', url);
+          }
+        },
+        {
+          label: 'Hard Reload ChatGPT',
+          accelerator: 'CommandOrControl+Shift+R',
+          click: () => {
+            const url = reloadMainWindow(true);
+            log('Menu hard reload requested', url);
+          }
+        },
+        { type: 'separator' },
+        { role: 'toggleDevTools' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 async function runInPage(source, ...args) {
@@ -288,12 +338,10 @@ async function sendChat(prompt) {
 }
 
 function refreshPage() {
-  const win = ensureWindow();
-  isPageLoaded = false;
-  win.webContents.reload();
+  const url = reloadMainWindow(true);
   return {
     ok: true,
-    url: win.webContents.getURL(),
+    url,
     message: 'Refresh requested.'
   };
 }
@@ -389,6 +437,7 @@ function startApiServer() {
 }
 
 app.whenReady().then(() => {
+  createMenu();
   createWindow();
   startApiServer();
 
