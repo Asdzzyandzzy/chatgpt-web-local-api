@@ -1,6 +1,8 @@
-# ZZY Browser
+# ChatGPT Web Local API
 
-ZZY Browser is a small Electron wrapper around the real ChatGPT website. It keeps the browser visible, preserves your local login session, and exposes a local HTTP API so scripts on your machine can drive the page.
+Turn the logged-in ChatGPT web app into a local HTTP API service.
+
+This project opens the real `chatgpt.com` page in Electron, keeps that browser window visible, preserves your local login session, and exposes `http://127.0.0.1:3123` so scripts on your machine can send prompts, read replies, open chats, and work with Projects.
 
 It is deliberately boring: no hidden browser engine, no login bypass, no CAPTCHA tricks, no private ChatGPT endpoints. If the page asks for human action, you handle it in the window.
 

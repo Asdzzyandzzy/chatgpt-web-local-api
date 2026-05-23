@@ -1,7 +1,7 @@
 {
-  "name": "zzy-browser",
+  "name": "chatgpt-web-local-api",
   "version": "0.1.0",
-  "description": "A local programmable Electron browser shell for driving the visible ChatGPT web app from scripts.",
+  "description": "Turn the logged-in ChatGPT web app into a local HTTP API service for scripts on your machine.",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
@@ -9,6 +9,7 @@
   "keywords": [
     "electron",
     "chatgpt",
+    "local-api",
     "browser",
     "automation"
   ],
