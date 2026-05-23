@@ -71,6 +71,7 @@ http://127.0.0.1:3123
 | `POST` | `/open-project` | 按 URL 或可见标题打开 Project |
 | `GET` | `/project-chats` | 读取当前 Project 页面里可见的历史 chat |
 | `POST` | `/project-chats` | 先打开 Project，再读取其中可见历史 chat |
+| `POST` | `/open-project-chat` | 打开 Project 中可见的某条 chat，并从 URL 读取 ID |
 | `POST` | `/new-project` | 尝试通过网页 UI 新建 Project |
 | `POST` | `/new-project-chat` | 在当前或指定 Project 里新开 chat |
 
@@ -235,6 +236,46 @@ curl.exe -X POST http://127.0.0.1:3123/project-chats ^
 
 `POST /project-chats` 会先打开 Project，并等待最多 10 秒让 Project 内 chat 列表渲染出来。
 
+如果 Project 页面里的 chat 是卡片而不是普通链接，返回项可能是：
+
+```json
+{
+  "title": "项目阶段协作",
+  "preview": "太简洁了",
+  "url": null,
+  "chatId": null,
+  "projectId": "g-p-...",
+  "projectChatId": null,
+  "source": "card",
+  "needsOpenForId": true,
+  "index": 0
+}
+```
+
+这时要先打开这张卡片，URL 才会暴露 chat id：
+
+```bat
+curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"index\":0}"
+```
+
+或者按标题打开：
+
+```bat
+curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"title\":\"项目阶段协作\"}"
+```
+
+如果要先打开指定 Project 再打开其中某条 chat：
+
+```bat
+curl.exe -X POST http://127.0.0.1:3123/open-project-chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"projectUrl\":\"https://chatgpt.com/g/g-p-your-project/project\",\"index\":0}"
+```
+
 在当前 Project 中新开 chat：
 
 ```bat
@@ -273,6 +314,8 @@ Project 相关接口也会尽量返回 `ids`。在 Project 内部 chat 页面上
 ```
 
 不同 ChatGPT 页面版本的 Project URL 格式可能不同，所以 `projectId` 是从当前 URL 中 best-effort 解析出来的。最稳的记录方式仍然是保存完整 `url`。
+
+当你停在 Project 首页时，`chatId` 和 `projectChatId` 为 `null` 是正常的，因为当前没有打开具体 chat。打开 Project 里的某条 chat 后，`/ids` 才会返回对应的 `projectChatId`。
 
 如果你调用 `/new-project-chat` 后还没有发送任何消息，返回里可能还没有 `chatId`。发出第一条 `/chat` 后，再从 `/chat` 返回或 `/ids` 读取新的 Project chat id。
 

@@ -435,37 +435,154 @@ function getAutomationScript() {
       const scoped = [];
       const fallback = [];
 
-      for (const root of scanRoots) {
-        for (const link of root.querySelectorAll('a[href]')) {
-          const url = normalizeChatUrl(link.getAttribute('href'));
-          if (!url || seen.has(url) || !visible(link)) continue;
-          if (link.closest('nav') || link.closest('aside')) continue;
+      const addCandidate = (el, url, source) => {
+        if (!visible(el)) return;
+        if (el.closest('nav') || el.closest('aside')) return;
+        if (el.closest('textarea, [contenteditable="true"]')) return;
 
-          const title = textOf(link);
-          if (!title) continue;
+        const rawText = textOf(el);
+        const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
+        const title = lines[0] || '';
+        if (!title) return;
 
+        const lowerTitle = title.toLowerCase();
+        const lowerText = rawText.toLowerCase();
+        if (['chats', 'sources', 'share'].includes(lowerTitle)) return;
+        if (lowerText.includes('new chat in') || lowerText.includes('instant')) return;
+        if (title === '...' || title === '⋯') return;
+
+        const key = url || rawText;
+        if (seen.has(key)) return;
+
+        const chat = {
+          title,
+          preview: lines.slice(1).join('\n') || '',
+          url,
+          chatId: url ? chatIdFromUrl(url) : null,
+          projectId: project.projectId,
+          projectChatId: url ? chatIdFromUrl(url) : null,
+          source,
+          needsOpenForId: !url
+        };
+
+        seen.add(key);
+
+        if (url) {
           const lowerUrl = url.toLowerCase();
-          const chat = {
-            title,
-            url,
-            chatId: chatIdFromUrl(url),
-            projectId: project.projectId,
-            projectChatId: chatIdFromUrl(url)
-          };
-
-          seen.add(url);
-
           if (lowerUrl.includes(project.projectId.toLowerCase()) || lowerUrl.includes('project')) {
             scoped.push(chat);
           } else {
             fallback.push(chat);
           }
+          return;
+        }
+
+        fallback.push(chat);
+      };
+
+      for (const root of scanRoots) {
+        for (const link of root.querySelectorAll('a[href]')) {
+          const url = normalizeChatUrl(link.getAttribute('href'));
+          if (!url) continue;
+          addCandidate(link, url, 'href');
+        }
+
+        const cardSelector = [
+          '[role="link"]',
+          '[role="button"]',
+          'button',
+          '[tabindex]:not([tabindex="-1"])',
+          'div'
+        ].join(',');
+
+        for (const el of root.querySelectorAll(cardSelector)) {
+          if (el.matches('a[href]')) continue;
+
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 180 || rect.height < 32 || rect.height > 220) continue;
+          if (el.querySelector('textarea, [contenteditable="true"]')) continue;
+
+          const text = textOf(el);
+          if (!text || text.length > 500) continue;
+
+          const childWithSameText = [...el.children].some((child) => {
+            if (!visible(child)) return false;
+            return textOf(child) === text && child.getBoundingClientRect().width >= rect.width * 0.7;
+          });
+          if (childWithSameText) continue;
+
+          addCandidate(el, null, 'card');
+        }
+      }
+
+      const chats = scoped.length ? scoped : fallback;
+      return {
+        project,
+        chats: chats.map((chat, index) => ({ ...chat, index }))
+      };
+    };
+
+    const openProjectChatByTitleOrIndex = (payload) => {
+      const list = getProjectScopedChats();
+      if (list.error) return list;
+
+      const index = Number.isInteger(payload?.index) ? payload.index : null;
+      const title = String(payload?.title || '').trim().toLowerCase();
+      const target = index !== null ?
+        list.chats[index] :
+        list.chats.find((chat) => chat.title.toLowerCase() === title) ||
+          list.chats.find((chat) => chat.title.toLowerCase().includes(title));
+
+      if (!target) {
+        return {
+          ok: false,
+          notFound: true,
+          project: list.project,
+          message: 'Could not find a visible Project chat with that title/index. Call /project-chats first.'
+        };
+      }
+
+      if (target.url) {
+        location.href = target.url;
+        return {
+          ok: true,
+          method: 'href',
+          project: list.project,
+          chat: target
+        };
+      }
+
+      const roots = [
+        document.querySelector('main'),
+        document.querySelector('[role="main"]')
+      ].filter(Boolean);
+      const scanRoots = roots.length ? roots : [document.body];
+
+      for (const root of scanRoots) {
+        const cards = [...root.querySelectorAll('[role="link"], [role="button"], button, [tabindex]:not([tabindex="-1"]), div')]
+          .filter((el) => visible(el) && !el.closest('nav') && !el.closest('aside'));
+
+        const match = cards.find((el) => {
+          const text = textOf(el).toLowerCase();
+          return text && text.includes(target.title.toLowerCase());
+        });
+
+        if (match) {
+          match.click();
+          return {
+            ok: true,
+            method: 'card',
+            project: list.project,
+            chat: target
+          };
         }
       }
 
       return {
-        project,
-        chats: scoped.length ? scoped : fallback
+        ok: false,
+        notFound: true,
+        project: list.project,
+        message: 'Found the Project chat in the list, but could not find its clickable card.'
       };
     };
 
@@ -824,6 +941,25 @@ function getAutomationScript() {
       return result;
     }
 
+    if (action === 'openProjectChat') {
+      const result = openProjectChatByTitleOrIndex(payload);
+      if (!result.ok) return result;
+
+      const startedAt = Date.now();
+      const beforeUrl = location.href;
+      while (location.href === beforeUrl && Date.now() - startedAt < 10000) {
+        await sleep(250);
+      }
+
+      await waitForComposer(10000);
+
+      return {
+        ...result,
+        url: location.href,
+        project: getCurrentProject() || result.project
+      };
+    }
+
     if (action === 'newProjectChat') {
       const timeoutMs = payload?.timeoutMs || 120000;
       const result = clickNewProjectChat();
@@ -1071,6 +1207,45 @@ async function listProjectChats(body = {}) {
   };
 }
 
+async function openProjectChat(body = {}) {
+  if (body.url) {
+    return openUrl(body.url);
+  }
+
+  let project = null;
+  if (body.projectUrl || body.projectTitle) {
+    project = await openProject({
+      url: body.projectUrl,
+      title: body.projectTitle
+    });
+  }
+
+  if (!body.title && !Number.isInteger(body.index)) {
+    throw new Error('Request body must include title or index. Optional: projectUrl or projectTitle.');
+  }
+
+  const result = await runInPage(getAutomationScript().toString(), 'openProjectChat', {
+    title: body.title,
+    index: body.index,
+    timeoutMs: REQUEST_TIMEOUT_MS
+  });
+
+  if (result.error || result.notFound) {
+    throw new Error(result.error || result.message);
+  }
+
+  const withParsedIds = withIds(result);
+  return {
+    ...withParsedIds,
+    openedProject: project,
+    ids: {
+      ...withParsedIds.ids,
+      projectId: withParsedIds.ids.projectId || result.project?.projectId || project?.ids?.projectId || null,
+      projectChatId: withParsedIds.ids.projectChatId || withParsedIds.ids.chatId || null
+    }
+  };
+}
+
 async function createNewProject(body) {
   const result = await runInPage(getAutomationScript().toString(), 'newProject', {
     name: body.name,
@@ -1262,6 +1437,14 @@ function startApiServer() {
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/open-project-chat') {
+        const body = await readJsonBody(req);
+        const result = await openProjectChat(body);
+        log('Open project chat requested', `method=${result.method} url=${result.url}`);
+        sendJson(res, 200, result);
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/new-project') {
         const body = await readJsonBody(req);
         const result = await createNewProject(body);
@@ -1294,6 +1477,7 @@ function startApiServer() {
           'POST /open-chat',
           'POST /open-project',
           'POST /project-chats',
+          'POST /open-project-chat',
           'POST /new-project',
           'POST /new-project-chat'
         ]
