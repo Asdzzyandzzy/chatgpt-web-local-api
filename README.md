@@ -223,6 +223,8 @@ curl.exe -X POST http://127.0.0.1:3123/open-project ^
 curl.exe http://127.0.0.1:3123/project-chats
 ```
 
+这个接口只读取 Project 页面主内容区里的 chat，会排除侧边栏/导航里的全局历史 chat。如果当前页面不是 Project，会返回错误。
+
 先打开指定 Project，再读取其中可见历史 chat：
 
 ```bat
@@ -230,6 +232,8 @@ curl.exe -X POST http://127.0.0.1:3123/project-chats ^
   -H "Content-Type: application/json" ^
   -d "{\"url\":\"https://chatgpt.com/project/your-project-id\"}"
 ```
+
+`POST /project-chats` 会先打开 Project，并等待最多 10 秒让 Project 内 chat 列表渲染出来。
 
 在当前 Project 中新开 chat：
 

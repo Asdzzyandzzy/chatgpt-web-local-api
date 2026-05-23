@@ -416,6 +416,59 @@ function getAutomationScript() {
       };
     };
 
+    const getProjectScopedChats = () => {
+      const project = getCurrentProject();
+      if (!project?.projectId) {
+        return {
+          project,
+          chats: [],
+          error: 'Current page does not look like a Project. Open a Project first or pass { url } / { title }.'
+        };
+      }
+
+      const roots = [
+        document.querySelector('main'),
+        document.querySelector('[role="main"]')
+      ].filter(Boolean);
+      const scanRoots = roots.length ? roots : [document.body];
+      const seen = new Set();
+      const scoped = [];
+      const fallback = [];
+
+      for (const root of scanRoots) {
+        for (const link of root.querySelectorAll('a[href]')) {
+          const url = normalizeChatUrl(link.getAttribute('href'));
+          if (!url || seen.has(url) || !visible(link)) continue;
+          if (link.closest('nav') || link.closest('aside')) continue;
+
+          const title = textOf(link);
+          if (!title) continue;
+
+          const lowerUrl = url.toLowerCase();
+          const chat = {
+            title,
+            url,
+            chatId: chatIdFromUrl(url),
+            projectId: project.projectId,
+            projectChatId: chatIdFromUrl(url)
+          };
+
+          seen.add(url);
+
+          if (lowerUrl.includes(project.projectId.toLowerCase()) || lowerUrl.includes('project')) {
+            scoped.push(chat);
+          } else {
+            fallback.push(chat);
+          }
+        }
+      }
+
+      return {
+        project,
+        chats: scoped.length ? scoped : fallback
+      };
+    };
+
     const clickNewProjectChat = () => {
       const project = getCurrentProject();
       if (!project?.projectId) {
@@ -759,10 +812,16 @@ function getAutomationScript() {
     }
 
     if (action === 'listProjectChats') {
-      return {
-        project: getCurrentProject(),
-        chats: getVisibleChats()
-      };
+      const timeoutMs = payload?.timeoutMs ?? 0;
+      const startedAt = Date.now();
+      let result = getProjectScopedChats();
+
+      while (!result.error && result.chats.length === 0 && Date.now() - startedAt < timeoutMs) {
+        await sleep(500);
+        result = getProjectScopedChats();
+      }
+
+      return result;
     }
 
     if (action === 'newProjectChat') {
@@ -994,11 +1053,18 @@ async function openProject(body) {
 }
 
 async function listProjectChats(body = {}) {
+  const shouldWait = Boolean(body.url || body.title);
   if (body.url || body.title) {
     await openProject(body);
   }
 
-  const result = await runInPage(getAutomationScript().toString(), 'listProjectChats', {});
+  const result = await runInPage(getAutomationScript().toString(), 'listProjectChats', {
+    timeoutMs: shouldWait ? 10000 : 0
+  });
+  if (result.error) {
+    throw new Error(result.error);
+  }
+
   return {
     ...result,
     ids: parseChatGptLocation(result.project?.url || ensureWindow().webContents.getURL())
