@@ -58,7 +58,8 @@ http://127.0.0.1:3123
 
 | Method | Path | 功能 |
 | --- | --- | --- |
-| `GET` | `/status` | 查看当前 URL、加载状态、是否看起来已登录 |
+| `GET` | `/status` | 查看当前 URL、加载状态、登录状态和当前 ID |
+| `GET` | `/ids` | 只返回当前 `chatId`、`projectId`、`projectChatId` |
 | `POST` | `/chat` | 向当前页面发送 prompt，并返回最新 assistant 回复 |
 | `GET` | `/last` | 读取当前页面最后一条 assistant 回复 |
 | `POST` | `/refresh` | 强制刷新当前 ChatGPT 页面 |
@@ -81,6 +82,37 @@ http://127.0.0.1:3123
 curl.exe http://127.0.0.1:3123/status
 ```
 
+返回里会包含当前页面 ID 信息：
+
+```json
+{
+  "url": "https://chatgpt.com/c/your-chat-id",
+  "loaded": true,
+  "looksLoggedIn": true,
+  "ids": {
+    "pageType": "chat",
+    "chatId": "your-chat-id",
+    "projectId": null,
+    "projectChatId": null
+  }
+}
+```
+
+只读取当前 ID：
+
+```bat
+curl.exe http://127.0.0.1:3123/ids
+```
+
+`pageType` 可能是：
+
+- `home`
+- `chat`
+- `project`
+- `project-chat`
+- `chatgpt`
+- `unknown`
+
 发送消息：
 
 ```bat
@@ -88,6 +120,8 @@ curl.exe -X POST http://127.0.0.1:3123/chat ^
   -H "Content-Type: application/json" ^
   -d "{\"prompt\":\"你好，请用一句话介绍你自己。\"}"
 ```
+
+`/chat` 的返回也会带当前 URL 和 `ids`。如果你刚 `/new-chat`，ChatGPT 通常会在第一条消息发送后才生成真正的 `chatId`，所以要在 `/chat` 返回里读取新会话 ID。
 
 读取最后一条回复：
 
@@ -140,6 +174,22 @@ curl.exe -X POST http://127.0.0.1:3123/open-url ^
 ```
 
 为了安全，`/open-url` 只允许打开 `https://chatgpt.com/...`。
+
+`/open-url`、`/open-chat`、`/new-chat` 的返回也会带 `ids`，例如：
+
+```json
+{
+  "ok": true,
+  "method": "loadURL",
+  "url": "https://chatgpt.com/c/your-chat-id",
+  "ids": {
+    "pageType": "chat",
+    "chatId": "your-chat-id",
+    "projectId": null,
+    "projectChatId": null
+  }
+}
+```
 
 ## Projects
 
@@ -204,6 +254,21 @@ curl.exe -X POST http://127.0.0.1:3123/new-project ^
 ```
 
 `/new-project` 会尝试点击页面里的 New project/Create project，填写名称，然后点击 Create/Done。这个接口最容易受 UI 改版影响；如果失败，请在可见窗口里手动创建 Project，再用 `/status` 保存 URL。
+
+Project 相关接口也会尽量返回 `ids`。在 Project 内部 chat 页面上，通常会看到：
+
+```json
+{
+  "pageType": "project-chat",
+  "chatId": "chat-id",
+  "projectId": "project-id",
+  "projectChatId": "chat-id"
+}
+```
+
+不同 ChatGPT 页面版本的 Project URL 格式可能不同，所以 `projectId` 是从当前 URL 中 best-effort 解析出来的。最稳的记录方式仍然是保存完整 `url`。
+
+如果你调用 `/new-project-chat` 后还没有发送任何消息，返回里可能还没有 `chatId`。发出第一条 `/chat` 后，再从 `/chat` 返回或 `/ids` 读取新的 Project chat id。
 
 ## 让其他项目调用
 

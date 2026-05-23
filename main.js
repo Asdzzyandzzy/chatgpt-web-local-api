@@ -286,6 +286,12 @@ function getAutomationScript() {
       }
     };
 
+    const chatIdFromUrl = (href) => {
+      const url = normalizeChatUrl(href);
+      if (!url) return null;
+      return new URL(url).pathname.split('/').filter(Boolean)[1] || null;
+    };
+
     const getVisibleChats = () => {
       const seen = new Set();
       const chats = [];
@@ -298,7 +304,7 @@ function getAutomationScript() {
         if (!title) continue;
 
         seen.add(url);
-        chats.push({ title, url });
+        chats.push({ title, url, chatId: chatIdFromUrl(url) });
       }
 
       return chats;
@@ -344,6 +350,22 @@ function getAutomationScript() {
       }
     };
 
+    const projectIdFromUrl = (href) => {
+      const url = normalizeProjectUrl(href);
+      if (!url) return null;
+
+      const parsed = new URL(url);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const gProject = parts.find((part) => part.startsWith('g-p-'));
+      if (gProject) return gProject;
+
+      const projectIndex = parts.findIndex((part) => part.toLowerCase().startsWith('project'));
+      if (projectIndex >= 0 && parts[projectIndex + 1]) return parts[projectIndex + 1];
+
+      const projectParam = parsed.searchParams.get('project') || parsed.searchParams.get('projectId');
+      return projectParam || null;
+    };
+
     const getVisibleProjects = () => {
       const seen = new Set();
       const projects = [];
@@ -356,7 +378,7 @@ function getAutomationScript() {
         if (!title) continue;
 
         seen.add(url);
-        projects.push({ title, url });
+        projects.push({ title, url, projectId: projectIdFromUrl(url) });
       }
 
       return projects;
@@ -389,7 +411,8 @@ function getAutomationScript() {
       const matchingProject = getVisibleProjects().find((project) => project.url === currentUrl);
       return {
         title: matchingProject?.title || document.title || '',
-        url: currentUrl
+        url: currentUrl,
+        projectId: projectIdFromUrl(currentUrl)
       };
     };
 
@@ -685,22 +708,40 @@ function getAutomationScript() {
 async function getStatus() {
   const win = ensureWindow();
   const pageStatus = await runInPage(getAutomationScript().toString(), 'status', {});
+  const url = win.webContents.getURL();
   return {
-    url: win.webContents.getURL(),
+    url,
     loaded: isPageLoaded && pageStatus.loaded,
-    looksLoggedIn: pageStatus.looksLoggedIn
+    looksLoggedIn: pageStatus.looksLoggedIn,
+    ids: parseChatGptLocation(url)
   };
 }
 
+function getCurrentIds() {
+  return parseChatGptLocation(ensureWindow().webContents.getURL());
+}
+
 async function getLastReply() {
-  return runInPage(getAutomationScript().toString(), 'last', {});
+  const result = await runInPage(getAutomationScript().toString(), 'last', {});
+  const url = ensureWindow().webContents.getURL();
+  return {
+    ...result,
+    url,
+    ids: parseChatGptLocation(url)
+  };
 }
 
 async function sendChat(prompt) {
-  return runInPage(getAutomationScript().toString(), 'chat', {
+  const result = await runInPage(getAutomationScript().toString(), 'chat', {
     prompt,
     timeoutMs: REQUEST_TIMEOUT_MS
   });
+  const url = ensureWindow().webContents.getURL();
+  return {
+    ...result,
+    url,
+    ids: parseChatGptLocation(url)
+  };
 }
 
 async function createNewChat() {
@@ -713,14 +754,16 @@ async function createNewChat() {
     isPageLoaded = false;
     await win.loadURL(CHATGPT_URL);
     return {
-      ok: true,
-      method: 'loadURL',
-      url: win.webContents.getURL(),
-      note: result.message
+      ...withIds({
+        ok: true,
+        method: 'loadURL',
+        url: win.webContents.getURL(),
+        note: result.message
+      })
     };
   }
 
-  return result;
+  return withIds(result);
 }
 
 function validateChatGptUrl(rawUrl) {
@@ -739,6 +782,59 @@ function validateChatGptUrl(rawUrl) {
   return parsed.href;
 }
 
+function parseChatGptLocation(rawUrl) {
+  const empty = {
+    pageType: 'unknown',
+    chatId: null,
+    projectId: null,
+    projectChatId: null
+  };
+
+  if (!rawUrl) return empty;
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (_error) {
+    return empty;
+  }
+
+  if (parsed.hostname !== 'chatgpt.com') return empty;
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  const lowerParts = parts.map((part) => part.toLowerCase());
+  const chatIndex = lowerParts.indexOf('c');
+  const chatId = chatIndex >= 0 ? parts[chatIndex + 1] || null : null;
+
+  const gProjectId = parts.find((part) => part.startsWith('g-p-')) || null;
+  const projectIndex = lowerParts.findIndex((part) => part === 'project' || part === 'projects');
+  const pathProjectId = projectIndex >= 0 ? parts[projectIndex + 1] || null : null;
+  const projectId = gProjectId ||
+    pathProjectId ||
+    parsed.searchParams.get('project') ||
+    parsed.searchParams.get('projectId') ||
+    null;
+
+  const pageType = projectId && chatId ? 'project-chat' :
+    projectId ? 'project' :
+      chatId ? 'chat' :
+        parsed.pathname === '/' ? 'home' : 'chatgpt';
+
+  return {
+    pageType,
+    chatId,
+    projectId,
+    projectChatId: projectId && chatId ? chatId : null
+  };
+}
+
+function withIds(payload, rawUrl = payload?.url) {
+  return {
+    ...payload,
+    ids: parseChatGptLocation(rawUrl)
+  };
+}
+
 async function openUrl(rawUrl) {
   const url = validateChatGptUrl(rawUrl);
   const win = ensureWindow();
@@ -748,7 +844,8 @@ async function openUrl(rawUrl) {
   return {
     ok: true,
     method: 'loadURL',
-    url: win.webContents.getURL()
+    url: win.webContents.getURL(),
+    ids: parseChatGptLocation(win.webContents.getURL())
   };
 }
 
@@ -774,7 +871,7 @@ async function openChat(body) {
     throw new Error(result.message);
   }
 
-  return result;
+  return withIds(result);
 }
 
 async function listProjects() {
@@ -799,7 +896,7 @@ async function openProject(body) {
     throw new Error(result.message);
   }
 
-  return result;
+  return withIds(result);
 }
 
 async function listProjectChats(body = {}) {
@@ -807,7 +904,11 @@ async function listProjectChats(body = {}) {
     await openProject(body);
   }
 
-  return runInPage(getAutomationScript().toString(), 'listProjectChats', {});
+  const result = await runInPage(getAutomationScript().toString(), 'listProjectChats', {});
+  return {
+    ...result,
+    ids: parseChatGptLocation(result.project?.url || ensureWindow().webContents.getURL())
+  };
 }
 
 async function createNewProject(body) {
@@ -820,7 +921,10 @@ async function createNewProject(body) {
     throw new Error(result.message);
   }
 
-  return result;
+  return {
+    ...result,
+    ids: parseChatGptLocation(result.project?.url)
+  };
 }
 
 async function createNewProjectChat(body = {}) {
@@ -835,7 +939,13 @@ async function createNewProjectChat(body = {}) {
   return {
     ok: true,
     project,
-    chat
+    chat,
+    ids: {
+      projectId: project?.ids?.projectId || chat?.ids?.projectId || null,
+      chatId: chat?.ids?.chatId || null,
+      projectChatId: chat?.ids?.projectChatId || null,
+      pageType: chat?.ids?.pageType || 'unknown'
+    }
   };
 }
 
@@ -844,6 +954,7 @@ function refreshPage() {
   return {
     ok: true,
     url,
+    ids: parseChatGptLocation(url),
     message: 'Refresh requested.'
   };
 }
@@ -892,6 +1003,12 @@ function startApiServer() {
       if (req.method === 'GET' && url.pathname === '/status') {
         const status = await getStatus();
         sendJson(res, 200, status);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/ids') {
+        const ids = getCurrentIds();
+        sendJson(res, 200, ids);
         return;
       }
 
@@ -997,6 +1114,7 @@ function startApiServer() {
         error: 'Not found',
         endpoints: [
           'GET /status',
+          'GET /ids',
           'GET /last',
           'GET /chats',
           'GET /projects',
