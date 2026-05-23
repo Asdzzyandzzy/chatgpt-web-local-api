@@ -287,6 +287,17 @@ async function sendChat(prompt) {
   });
 }
 
+function refreshPage() {
+  const win = ensureWindow();
+  isPageLoaded = false;
+  win.webContents.reload();
+  return {
+    ok: true,
+    url: win.webContents.getURL(),
+    message: 'Refresh requested.'
+  };
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
@@ -349,9 +360,16 @@ function startApiServer() {
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/refresh') {
+        const result = refreshPage();
+        log('Refresh requested', result.url);
+        sendJson(res, 200, result);
+        return;
+      }
+
       sendJson(res, 404, {
         error: 'Not found',
-        endpoints: ['GET /status', 'GET /last', 'POST /chat']
+        endpoints: ['GET /status', 'GET /last', 'POST /chat', 'POST /refresh']
       });
     } catch (error) {
       log('API error', error.message);
