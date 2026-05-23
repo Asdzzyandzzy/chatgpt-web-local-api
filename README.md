@@ -94,6 +94,16 @@ curl -X POST http://127.0.0.1:3123/refresh
 
 也可以在应用菜单里点击 `View -> Reload ChatGPT`，或使用快捷键 `Ctrl+R`。如果普通刷新没反应，点击 `View -> Hard Reload ChatGPT`，或使用 `Ctrl+Shift+R`。
 
+### 新开会话
+
+如果当前对话上下文太长，或者你希望从一个干净会话开始，可以调用：
+
+```bash
+curl -X POST http://127.0.0.1:3123/new-chat
+```
+
+它会优先点击 ChatGPT 页面里的 New chat/新聊天按钮。如果找不到按钮，会兜底重新加载 `https://chatgpt.com/`。
+
 ## 安全设置
 
 Electron 远程页面配置：
@@ -113,6 +123,7 @@ Electron 远程页面配置：
 - 页面加载状态
 - 是否成功发送
 - 是否触发刷新
+- 是否触发新会话
 - 读取到的回复长度
 - 错误信息
 
@@ -137,3 +148,7 @@ ChatGPT 页面结构可能改版。如果出现类似 `Could not find ChatGPT in
 ### 回复超时
 
 `POST /chat` 默认最多等待 120 秒。网络慢、页面卡住、登录状态异常、或 ChatGPT 正在要求人工操作时可能超时。终端日志会显示对应错误。
+
+### 新会话失败
+
+如果 `/new-chat` 返回找不到按钮，通常是页面结构改版、侧边栏被隐藏、或页面被登录/验证码弹窗挡住。可以先在窗口里手动点一次新聊天，或调用 `/refresh` 后再试。

@@ -232,6 +232,49 @@ function getAutomationScript() {
       return 'enter';
     };
 
+    const waitForComposer = async (timeoutMs) => {
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < timeoutMs) {
+        const composer = findComposer();
+        if (composer) return true;
+        await sleep(250);
+      }
+
+      return false;
+    };
+
+    const clickNewChat = () => {
+      const selectors = [
+        'a[href="/"]',
+        'a[href="/?model=auto"]',
+        '[data-testid="create-new-chat-button"]',
+        '[aria-label*="New chat"]',
+        '[aria-label*="新聊天"]'
+      ];
+
+      for (const selector of selectors) {
+        const el = [...document.querySelectorAll(selector)].find(visible);
+        if (el) {
+          el.click();
+          return selector;
+        }
+      }
+
+      const button = [...document.querySelectorAll('a, button')].find((el) => {
+        if (!visible(el)) return false;
+        const label = `${textOf(el)} ${el.getAttribute('aria-label') || ''} ${el.title || ''}`.toLowerCase();
+        return label.includes('new chat') || label.includes('新聊天');
+      });
+
+      if (button) {
+        button.click();
+        return 'text-match';
+      }
+
+      return null;
+    };
+
     const waitForStableAssistant = async (previousText, timeoutMs) => {
       const startedAt = Date.now();
       let lastText = '';
@@ -312,6 +355,31 @@ function getAutomationScript() {
       };
     }
 
+    if (action === 'newChat') {
+      const timeoutMs = payload?.timeoutMs || 120000;
+      const clicked = clickNewChat();
+
+      if (!clicked) {
+        return {
+          ok: false,
+          needsNavigationFallback: true,
+          message: 'Could not find New chat button. Tried href, data-testid, aria-label, and visible button text.'
+        };
+      }
+
+      await sleep(500);
+      const composerReady = await waitForComposer(timeoutMs);
+      if (!composerReady) {
+        throw new Error(`Clicked New chat (${clicked}), but composer was not ready after ${timeoutMs}ms.`);
+      }
+
+      return {
+        ok: true,
+        method: clicked,
+        url: location.href
+      };
+    }
+
     throw new Error(`Unknown page automation action: ${action}`);
   };
 }
@@ -335,6 +403,26 @@ async function sendChat(prompt) {
     prompt,
     timeoutMs: REQUEST_TIMEOUT_MS
   });
+}
+
+async function createNewChat() {
+  const result = await runInPage(getAutomationScript().toString(), 'newChat', {
+    timeoutMs: REQUEST_TIMEOUT_MS
+  });
+
+  if (result.needsNavigationFallback) {
+    const win = ensureWindow();
+    isPageLoaded = false;
+    await win.loadURL(CHATGPT_URL);
+    return {
+      ok: true,
+      method: 'loadURL',
+      url: win.webContents.getURL(),
+      note: result.message
+    };
+  }
+
+  return result;
 }
 
 function refreshPage() {
@@ -415,9 +503,16 @@ function startApiServer() {
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/new-chat') {
+        const result = await createNewChat();
+        log('New chat requested', `method=${result.method} url=${result.url}`);
+        sendJson(res, 200, result);
+        return;
+      }
+
       sendJson(res, 404, {
         error: 'Not found',
-        endpoints: ['GET /status', 'GET /last', 'POST /chat', 'POST /refresh']
+        endpoints: ['GET /status', 'GET /last', 'POST /chat', 'POST /refresh', 'POST /new-chat']
       });
     } catch (error) {
       log('API error', error.message);
